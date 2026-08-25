@@ -1,5 +1,7 @@
 # 🎬 CineMatch
 
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-Open%20CineMatch-8b5cf6?style=for-the-badge)](https://movie-app-ypfie7rv9e8nyzj5arxgxw.streamlit.app/)
+
 A polished hybrid movie discovery and recommendation app built with Python, scikit-learn, pandas, NumPy and Streamlit.
 
 CineMatch blends **collaborative filtering**, **genre/content similarity**, **rating quality**, and lightweight intent parsing to help users discover movies from either a title they already love or a natural-language request such as:
@@ -18,7 +20,7 @@ CineMatch blends **collaborative filtering**, **genre/content similarity**, **ra
 - Genre exploration ranked by rating quality and audience volume
 - Session watchlist for saving interesting picks
 - Trailer and movie-detail links from every recommendation card
-- Modern responsive Streamlit interface
+- Responsive product-style Streamlit interface
 - Clear separation between UI and recommendation logic
 - Automated tests for the core recommendation engine
 
@@ -52,19 +54,19 @@ MovieLens movies + ratings
 
 ## 🖥️ Product Experience
 
-The application includes four main experiences:
+The application includes four focused experiences:
 
-### Smart Discovery
+### Discover
 Describe what you feel like watching and CineMatch interprets mood, genre and era hints.
 
 ### Similar Movies
 Start with a movie you already know and receive blended recommendations based on audience behavior and content overlap.
 
-### Explore Genres
-Browse standout titles inside any genre using rating quality and popularity.
+### Browse Genres
+Explore standout titles inside any genre using rating quality and popularity.
 
-### Watchlist
-Save interesting recommendations while you compare options during the current session.
+### Saved
+Keep a lightweight watchlist while comparing titles during the current session.
 
 ## 🛠️ Tech Stack
 
@@ -97,7 +99,6 @@ movie-app/
 ```bash
 git clone https://github.com/VirojaYeshpatel/movie-app.git
 cd movie-app
-
 python -m venv .venv
 ```
 
@@ -132,25 +133,13 @@ http://localhost:8501
 pytest -q
 ```
 
-The test suite covers:
+The test suite covers fuzzy movie search, source-title exclusion, mood + decade discovery, and genre filtering.
 
-- fuzzy movie search
-- source-title exclusion
-- mood + decade discovery
-- genre filtering
+## 🌐 Live App
 
-## 🌐 Deploy to Streamlit Community Cloud
+CineMatch is deployed on Streamlit Community Cloud:
 
-This repository is deployment-ready.
-
-1. Open Streamlit Community Cloud
-2. Sign in with GitHub
-3. Choose `VirojaYeshpatel/movie-app`
-4. Select branch `main`
-5. Set the main file to `movie_app.py`
-6. Deploy
-
-After deployment, copy the generated public URL into the GitHub repository **Website** field and optionally add a `Live Demo` badge here at the top of the README.
+https://movie-app-ypfie7rv9e8nyzj5arxgxw.streamlit.app/
 
 ## 📊 Dataset
 
