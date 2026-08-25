@@ -1,307 +1,367 @@
+from __future__ import annotations
+
+from urllib.parse import quote_plus
+
 import streamlit as st
-import pandas as pd
-import numpy as np
-from sklearn.metrics.pairwise import cosine_similarity
-import pickle
-import os
 
-st.set_page_config(page_title="Movie Recommendation System", layout="wide")
-
-# --- Optimized Data Loading with Memory Management ---
-@st.cache_data
-def load_data():
-    try:
-        if os.path.exists("similarity_matrix.pkl"):
-            with open("similarity_matrix.pkl", "rb") as f:
-                similarity_df = pickle.load(f)
-            movies = pd.read_csv("movies.csv")
-            return similarity_df, movies
-
-        if os.path.exists("movies.csv") and os.path.exists("ratings.csv"):
-            movies = pd.read_csv("movies.csv")
-            ratings = pd.read_csv("ratings.csv")
-
-            if len(ratings) > 100000:  # Limit to 100k ratings
-                ratings = ratings.sample(n=100000, random_state=42)
-
-            movie_counts = ratings['movieId'].value_counts()
-            popular_movies = movie_counts[movie_counts >= 50].index
-            ratings = ratings[ratings['movieId'].isin(popular_movies)]
-            movies = movies[movies['movieId'].isin(popular_movies)]
-
-            movie_data = pd.merge(ratings, movies, on="movieId")
-            user_movie_matrix = movie_data.pivot_table(
-                index="userId",
-                columns="title",
-                values="rating",
-                fill_value=0
-            )
-
-            if user_movie_matrix.shape[1] > 500:
-                movie_rating_counts = user_movie_matrix.sum(axis=0).sort_values(ascending=False)
-                top_movies = movie_rating_counts.head(500).index
-                user_movie_matrix = user_movie_matrix[top_movies]
-
-            similarity_df = compute_similarity_chunked(user_movie_matrix)
-
-            with open("similarity_matrix.pkl", "wb") as f:
-                pickle.dump(similarity_df, f)
-
-            return similarity_df, movies
-
-    except Exception as e:
-        st.warning(f"Error loading data: {str(e)}. Using sample data.")
-
-    sample_movies = [
-        "Toy Story", "Jumanji", "Grumpier Old Men", "Waiting to Exhale",
-        "Father of the Bride Part II", "Heat", "Sabrina", "Tom and Huck",
-        "Sudden Death", "GoldenEye", "The American President", "Dracula: Dead and Loving It",
-        "Balto", "Nixon", "Cutthroat Island", "Casino", "Sense and Sensibility",
-        "Four Rooms", "Ace Ventura: When Nature Calls", "Money Train"
-    ]
-
-    np.random.seed(42)
-    similarity_matrix = np.random.rand(len(sample_movies), len(sample_movies))
-    similarity_matrix = (similarity_matrix + similarity_matrix.T) / 2
-    np.fill_diagonal(similarity_matrix, 1.0)
-
-    similarity_df = pd.DataFrame(
-        similarity_matrix,
-        index=sample_movies,
-        columns=sample_movies
-    )
-
-    movies_df = pd.DataFrame({
-        'movieId': range(1, len(sample_movies) + 1),
-        'title': sample_movies
-    })
-
-    return similarity_df, movies_df
+from recommender import MovieRecommender, Recommendation
 
 
-def compute_similarity_chunked(user_movie_matrix, chunk_size=50):
-    movies = user_movie_matrix.columns
-    n_movies = len(movies)
-    similarity_matrix = np.zeros((n_movies, n_movies))
-
-    for i in range(0, n_movies, chunk_size):
-        end_i = min(i + chunk_size, n_movies)
-        chunk_i = user_movie_matrix.iloc[:, i:end_i].T
-
-        for j in range(0, n_movies, chunk_size):
-            end_j = min(j + chunk_size, n_movies)
-            chunk_j = user_movie_matrix.iloc[:, j:end_j].T
-
-            sim_chunk = cosine_similarity(chunk_i, chunk_j)
-            similarity_matrix[i:end_i, j:end_j] = sim_chunk
-
-    return pd.DataFrame(similarity_matrix, index=movies, columns=movies)
-
-
-try:
-    similarity_df, movies_df = load_data()
-except Exception as e:
-    st.error(f"Failed to load data: {str(e)}")
-    st.stop()
-
-
-def recommend_movies(movie_name, num_recommendations=5):
-    if similarity_df.empty:
-        return None, pd.Series(dtype=float)
-
-    matches = [m for m in similarity_df.columns if movie_name.lower() in m.lower()]
-    if not matches:
-        matches = [m for m in similarity_df.columns
-                   if any(word.lower() in m.lower() for word in movie_name.split())]
-
-    if not matches:
-        return None, pd.Series(dtype=float)
-
-    selected_movie = matches[0]
-    sim_scores = similarity_df[selected_movie].sort_values(ascending=False)
-
-    recommendations = sim_scores.iloc[1:num_recommendations + 1]
-    return selected_movie, recommendations
-
-
-if 'selected_genre' not in st.session_state:
-    st.session_state.selected_genre = None
-
-
-# --- Streamlit UI ---
-st.markdown("""
-    <style>
-    .metric-container {
-        background: linear-gradient(135deg, #667eea, #764ba2);
-        padding: 1rem;
-        border-radius: 10px;
-        color: white;
-        text-align: center;
-        margin: 0.5rem 0;
-    }
-    .recommendation-header {
-        background: linear-gradient(135deg, #667eea, #764ba2);
-        color: white;
-        padding: 1rem;
-        border-radius: 8px;
-        margin-bottom: 1rem;
-        text-align: center;
-        font-weight: bold;
-    }
-    </style>
-""", unsafe_allow_html=True)
-
-st.title("🎬 Movie Recommendation System")
-st.markdown("*Discover movies you'll love based on your preferences*")
-
-if not similarity_df.empty:
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.markdown(f'''
-        <div class="metric-container">
-            <h3>{len(similarity_df.columns)}</h3>
-            <p>Movies Available</p>
-        </div>
-        ''', unsafe_allow_html=True)
-    with col2:
-        st.markdown(f'''
-        <div class="metric-container">
-            <h3>AI-Powered</h3>
-            <p>Recommendations</p>
-        </div>
-        ''', unsafe_allow_html=True)
-    with col3:
-        st.markdown(f'''
-        <div class="metric-container">
-            <h3>Instant</h3>
-            <p>Results</p>
-        </div>
-        ''', unsafe_allow_html=True)
-
-st.markdown("---")
-
-# --- Movie Search Section ---
-st.header("🔍 Find Similar Movies")
-st.markdown("Enter a movie name to get personalized recommendations based on user ratings and preferences.")
-
-if 'movie_search' not in st.session_state:
-    st.session_state.movie_search = ""
-
-movie_input = st.text_input(
-    "Movie Name:",
-    value=st.session_state.movie_search,
-    placeholder="e.g., Toy Story, Titanic, The Matrix...",
-    help="Type any movie name to find similar recommendations"
+st.set_page_config(
+    page_title="CineMatch — Movie Discovery",
+    page_icon="🎬",
+    layout="wide",
+    initial_sidebar_state="expanded",
 )
 
-if movie_input:
-    with st.spinner("🔄 Analyzing movie preferences and finding recommendations..."):
-        selected, recommended = recommend_movies(movie_input, 8)
 
-    if selected and not recommended.empty:
-        st.markdown(f'''
-        <div class="recommendation-header">
-            🎯 Movies Similar to "{selected}"
+@st.cache_resource(show_spinner="Building recommendation engine...")
+def get_engine() -> MovieRecommender:
+    return MovieRecommender.from_csv(max_movies=900, minimum_ratings=10)
+
+
+engine = get_engine()
+
+if "watchlist" not in st.session_state:
+    st.session_state.watchlist = set()
+
+
+def youtube_url(title: str) -> str:
+    return f"https://www.youtube.com/results?search_query={quote_plus(title + ' official trailer')}"
+
+
+def search_url(title: str) -> str:
+    return f"https://www.google.com/search?q={quote_plus(title + ' movie')}"
+
+
+def score_label(score: float) -> str:
+    return f"{round(score * 100)}% match"
+
+
+def add_to_watchlist(title: str) -> None:
+    st.session_state.watchlist.add(title)
+
+
+def remove_from_watchlist(title: str) -> None:
+    st.session_state.watchlist.discard(title)
+
+
+def render_movie_card(rec: Recommendation, key_prefix: str) -> None:
+    genres = " · ".join(rec.genres[:4])
+    rating = f"{rec.average_rating:.1f}/5" if rec.average_rating else "New"
+    year = rec.year or "—"
+
+    st.markdown(
+        f"""
+        <div class="movie-card">
+            <div class="movie-card-top">
+                <span class="match-pill">{score_label(rec.score)}</span>
+                <span class="rating-pill">★ {rating}</span>
+            </div>
+            <h3>{rec.title}</h3>
+            <div class="meta">{year} &nbsp;•&nbsp; {genres}</div>
+            <div class="reason">{rec.reason}</div>
+            <div class="ratings-count">{rec.rating_count:,} ratings in the dataset</div>
         </div>
-        ''', unsafe_allow_html=True)
+        """,
+        unsafe_allow_html=True,
+    )
 
-        cols = st.columns(2)
-        for i, (movie, score) in enumerate(recommended.items()):
-            col_idx = i % 2
-            with cols[col_idx]:
-                with st.container():
-                    st.markdown(f"**🎬 {movie}**")
-                    st.write(f"Similarity Score: {score:.3f}")
-                    st.write(f"Rank: #{i+1}")
+    c1, c2, c3 = st.columns([1.2, 1.1, 1.2])
+    with c1:
+        st.link_button("▶ Trailer", youtube_url(rec.title), use_container_width=True)
+    with c2:
+        st.link_button("Details", search_url(rec.title), use_container_width=True)
+    with c3:
+        if rec.title in st.session_state.watchlist:
+            if st.button("✓ Saved", key=f"{key_prefix}_remove_{rec.title}", use_container_width=True):
+                remove_from_watchlist(rec.title)
+                st.rerun()
+        else:
+            if st.button("+ Watchlist", key=f"{key_prefix}_add_{rec.title}", use_container_width=True):
+                add_to_watchlist(rec.title)
+                st.rerun()
 
-                    # Add AI feature: YouTube trailer + Google info links
-                    youtube_url = f"https://www.youtube.com/results?search_query={movie.replace(' ', '+')}+trailer"
-                    google_url = f"https://www.google.com/search?q={movie.replace(' ', '+')}+movie"
 
-                    st.markdown(f"[▶ Watch Trailer]({youtube_url})", unsafe_allow_html=True)
-                    st.markdown(f"[🔗 More Info]({google_url})", unsafe_allow_html=True)
+st.markdown(
+    """
+    <style>
+      .stApp {
+        background:
+          radial-gradient(circle at 12% 10%, rgba(124,58,237,.15), transparent 30%),
+          radial-gradient(circle at 85% 15%, rgba(14,165,233,.12), transparent 26%),
+          #090b10;
+        color: #f8fafc;
+      }
+      [data-testid="stSidebar"] {
+        background: rgba(11, 15, 24, .96);
+        border-right: 1px solid rgba(148,163,184,.12);
+      }
+      .hero {
+        padding: 2.25rem 2.4rem;
+        border: 1px solid rgba(148,163,184,.14);
+        border-radius: 28px;
+        background: linear-gradient(135deg, rgba(30,41,59,.82), rgba(15,23,42,.54));
+        box-shadow: 0 24px 80px rgba(0,0,0,.30);
+        margin-bottom: 1.25rem;
+      }
+      .eyebrow {
+        color: #a78bfa;
+        text-transform: uppercase;
+        letter-spacing: .16em;
+        font-size: .78rem;
+        font-weight: 800;
+      }
+      .hero h1 {
+        margin: .45rem 0 .55rem;
+        font-size: clamp(2.35rem, 5vw, 4.8rem);
+        line-height: .98;
+        letter-spacing: -.045em;
+      }
+      .hero p {
+        color: #cbd5e1;
+        font-size: 1.08rem;
+        max-width: 760px;
+        margin: 0;
+      }
+      .stat-card {
+        padding: 1rem 1.1rem;
+        border-radius: 18px;
+        border: 1px solid rgba(148,163,184,.12);
+        background: rgba(15,23,42,.58);
+        min-height: 95px;
+      }
+      .stat-number {
+        font-size: 1.7rem;
+        font-weight: 800;
+      }
+      .stat-label {
+        color: #94a3b8;
+        font-size: .85rem;
+      }
+      .movie-card {
+        border: 1px solid rgba(148,163,184,.14);
+        border-radius: 20px;
+        padding: 1.1rem 1.15rem 1rem;
+        background: linear-gradient(145deg, rgba(30,41,59,.78), rgba(15,23,42,.76));
+        min-height: 205px;
+        box-shadow: 0 10px 35px rgba(0,0,0,.18);
+      }
+      .movie-card-top {
+        display: flex;
+        justify-content: space-between;
+        gap: .5rem;
+      }
+      .match-pill, .rating-pill {
+        font-size: .75rem;
+        font-weight: 800;
+        border-radius: 999px;
+        padding: .3rem .55rem;
+      }
+      .match-pill {
+        color: #ddd6fe;
+        background: rgba(124,58,237,.25);
+        border: 1px solid rgba(167,139,250,.28);
+      }
+      .rating-pill {
+        color: #fde68a;
+        background: rgba(245,158,11,.12);
+        border: 1px solid rgba(245,158,11,.18);
+      }
+      .movie-card h3 {
+        font-size: 1.15rem;
+        margin: .9rem 0 .35rem;
+      }
+      .meta, .ratings-count {
+        color: #94a3b8;
+        font-size: .82rem;
+      }
+      .reason {
+        margin: .9rem 0 .6rem;
+        color: #dbeafe;
+        font-size: .92rem;
+        line-height: 1.42;
+      }
+      .section-title {
+        font-size: 1.45rem;
+        font-weight: 800;
+        margin-top: .35rem;
+        margin-bottom: .2rem;
+      }
+      .section-copy {
+        color: #94a3b8;
+        margin-bottom: 1rem;
+      }
+      div[data-testid="stMetric"] {
+        background: rgba(15,23,42,.48);
+        border: 1px solid rgba(148,163,184,.12);
+        padding: .7rem 1rem;
+        border-radius: 16px;
+      }
+      .stTabs [data-baseweb="tab-list"] {
+        gap: .35rem;
+      }
+      .stTabs [data-baseweb="tab"] {
+        border-radius: 10px;
+        padding: .45rem .8rem;
+      }
+      footer { visibility: hidden; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
-                    st.markdown("---")
+summary = engine.catalog_summary()
 
+st.markdown(
+    """
+    <div class="hero">
+      <div class="eyebrow">Hybrid recommendation engine</div>
+      <h1>CineMatch</h1>
+      <p>Discover movies by mood, era and genre, or start from a title you already love.
+      Recommendations blend audience behavior, genre similarity and rating quality.</p>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+stat_cols = st.columns(4)
+stats = [
+    (f"{summary['movies']:,}", "Curated catalog"),
+    (f"{summary['ratings']:,}", "Viewer ratings"),
+    (f"{summary['users']:,}", "Audience profiles"),
+    (f"{summary['genres']}", "Genres"),
+]
+for column, (value, label) in zip(stat_cols, stats):
+    with column:
+        st.markdown(
+            f'<div class="stat-card"><div class="stat-number">{value}</div>'
+            f'<div class="stat-label">{label}</div></div>',
+            unsafe_allow_html=True,
+        )
+
+st.sidebar.markdown("## 🎬 CineMatch")
+st.sidebar.caption("Recommendation intelligence built from MovieLens ratings and movie metadata.")
+st.sidebar.divider()
+st.sidebar.markdown("### Your watchlist")
+if st.session_state.watchlist:
+    for movie in sorted(st.session_state.watchlist):
+        st.sidebar.write(f"• {movie}")
+    if st.sidebar.button("Clear watchlist", use_container_width=True):
+        st.session_state.watchlist.clear()
+        st.rerun()
+else:
+    st.sidebar.caption("Save interesting picks and they’ll appear here.")
+
+st.sidebar.divider()
+st.sidebar.markdown("### How ranking works")
+st.sidebar.caption(
+    "Similar-title results combine collaborative similarity, shared genres and popularity. "
+    "Discovery results interpret mood, genre and era signals before ranking titles."
+)
+
+discover_tab, similar_tab, explore_tab, watchlist_tab = st.tabs(
+    ["✨ Smart Discovery", "🎯 Similar Movies", "🧭 Explore Genres", "🔖 Watchlist"]
+)
+
+with discover_tab:
+    st.markdown('<div class="section-title">Describe what you feel like watching</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="section-copy">Try: “funny 90s movie”, “dark sci-fi”, “family adventure”, or “recent thriller”.</div>',
+        unsafe_allow_html=True,
+    )
+    query = st.text_input(
+        "Discovery prompt",
+        placeholder="e.g. a funny 90s movie with adventure",
+        label_visibility="collapsed",
+        key="discovery_query",
+    )
+    selected_genres = st.multiselect(
+        "Optional genre filters",
+        engine.available_genres,
+        default=[],
+        placeholder="Add genres if you want tighter results",
+    )
+
+    if query or selected_genres:
+        results = engine.discover(query, selected_genres=selected_genres, limit=12)
     else:
-        st.error("❌ No matches found. Please check the movie name spelling.")
-        if not similarity_df.empty:
-            st.info("💡 **Available movies in our database:**")
-            sample_movies = list(similarity_df.columns)[:15]
+        results = engine.discover("", limit=12)
+
+    if not results:
+        st.warning("No titles matched those filters. Try a broader mood, genre or era.")
+    else:
+        for row_start in range(0, len(results), 3):
             cols = st.columns(3)
-            for i, movie in enumerate(sample_movies):
-                col_idx = i % 3
-                with cols[col_idx]:
-                    if st.button(f"🎬 {movie}", key=f"sample_{i}"):
-                        st.session_state.movie_search = movie
-                        st.rerun()
+            for col, rec in zip(cols, results[row_start : row_start + 3]):
+                with col:
+                    render_movie_card(rec, f"discover_{row_start}")
 
-# --- Genre Recommendations Section ---
-st.markdown("---")
-st.header("🎭 Browse by Genre")
-st.markdown("Explore curated movie recommendations by genre")
+with similar_tab:
+    st.markdown('<div class="section-title">Start with a movie you already love</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="section-copy">Search the catalog, select a title, and get blended recommendations with explanations.</div>',
+        unsafe_allow_html=True,
+    )
+    search = st.text_input(
+        "Movie title",
+        placeholder="Type a movie title...",
+        label_visibility="collapsed",
+        key="similar_search",
+    )
+    suggestions = engine.search_titles(search, limit=8) if search else []
+    if search and not suggestions:
+        st.info("No close title found. Try fewer words or a different spelling.")
+    elif suggestions:
+        selected = st.selectbox("Best matches", suggestions, index=0)
+        canonical, results = engine.recommend_similar(selected, limit=12)
+        if canonical:
+            st.caption(f"Recommendations based on **{canonical}**")
+        for row_start in range(0, len(results), 3):
+            cols = st.columns(3)
+            for col, rec in zip(cols, results[row_start : row_start + 3]):
+                with col:
+                    render_movie_card(rec, f"similar_{row_start}")
 
-genres = {
-    "🏆 Top Rated": [
-        "The Shawshank Redemption", "The Godfather", "The Dark Knight",
-        "12 Angry Men", "Schindler's List"
-    ],
-    "🎯 Action": [
-        "Mad Max: Fury Road", "John Wick", "The Matrix",
-        "Mission: Impossible", "Die Hard"
-    ],
-    "💕 Romance": [
-        "Titanic", "The Notebook", "Casablanca",
-        "Pride and Prejudice", "When Harry Met Sally"
-    ],
-    "😄 Comedy": [
-        "The Grand Budapest Hotel", "Superbad", "Anchorman",
-        "Bridesmaids", "The Hangover"
-    ],
-    "👻 Horror": [
-        "The Exorcist", "Halloween", "A Quiet Place",
-        "Get Out", "Hereditary"
-    ],
-    "🚀 Sci-Fi": [
-        "Blade Runner 2049", "Interstellar", "The Matrix",
-        "Arrival", "Ex Machina"
-    ]
-}
+with explore_tab:
+    st.markdown('<div class="section-title">Explore standout titles by genre</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="section-copy">Browse top-ranked picks using rating quality and audience volume.</div>',
+        unsafe_allow_html=True,
+    )
+    genre_index = engine.available_genres.index("Drama") if "Drama" in engine.available_genres else 0
+    genre = st.selectbox("Choose a genre", engine.available_genres, index=genre_index)
+    results = engine.top_by_genre(genre, limit=12)
+    for row_start in range(0, len(results), 3):
+        cols = st.columns(3)
+        for col, rec in zip(cols, results[row_start : row_start + 3]):
+            with col:
+                render_movie_card(rec, f"genre_{genre}_{row_start}")
 
-genre_cols = st.columns(3)
-selected_genre = None
-for i, genre in enumerate(genres.keys()):
-    col_idx = i % 3
-    with genre_cols[col_idx]:
-        if st.button(genre, key=f"genre_{i}", use_container_width=True):
-            selected_genre = genre
+with watchlist_tab:
+    st.markdown('<div class="section-title">Saved for later</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="section-copy">A lightweight session watchlist for comparing titles before you choose.</div>',
+        unsafe_allow_html=True,
+    )
+    if not st.session_state.watchlist:
+        st.info("Your watchlist is empty. Save a movie from any recommendation card.")
+    else:
+        for title in sorted(st.session_state.watchlist):
+            st.markdown(f"### {title}")
+            c1, c2, c3 = st.columns([1, 1, 1])
+            with c1:
+                st.link_button("▶ Trailer", youtube_url(title), use_container_width=True)
+            with c2:
+                st.link_button("Details", search_url(title), use_container_width=True)
+            with c3:
+                if st.button("Remove", key=f"watchlist_remove_{title}", use_container_width=True):
+                    remove_from_watchlist(title)
+                    st.rerun()
+            st.divider()
 
-if selected_genre:
-    st.subheader(f"{selected_genre} Movies")
-    movies = genres[selected_genre]
-    cols = st.columns(2)
-    for i, movie in enumerate(movies):
-        col_idx = i % 2
-        with cols[col_idx]:
-            with st.container():
-                st.markdown(f"**🎬 {movie}**")
-                st.write(f"Recommended for {selected_genre.lower()} enthusiasts")
-
-                # Add YouTube + Google links here too
-                youtube_url = f"https://www.youtube.com/results?search_query={movie.replace(' ', '+')}+trailer"
-                google_url = f"https://www.google.com/search?q={movie.replace(' ', '+')}+movie"
-
-                st.markdown(f"[▶ Watch Trailer]({youtube_url})", unsafe_allow_html=True)
-                st.markdown(f"[🔗 More Info]({google_url})", unsafe_allow_html=True)
-
-                st.markdown("---")
-
-# --- Footer ---
-st.markdown("---")
-st.markdown("""
-<div style="text-align: center; padding: 2rem; color: #666;">
-    <h3>🎬 Movie Recommendation System</h3>
-    <p>Powered by Machine Learning • Built with Streamlit</p>
-    <p>Discover your next favorite movie!</p>
-</div>
-""", unsafe_allow_html=True)
+st.divider()
+st.caption(
+    "CineMatch • Hybrid collaborative + content-based movie recommendation • "
+    "Built with Python, scikit-learn and Streamlit"
+)
